@@ -4,34 +4,155 @@ import './index.css';
 
 
 function App() {
-  const form = useRef();
-const [selectedTech, setSelectedTech] = useState(null);
-  const sendEmail = (e) => {
-  e.preventDefault();
+  const form = useRef(null);
+  const [selectedTech, setSelectedTech] = useState(null);
+  const [formData, setFormData] = useState({
+    from_name: "",
+    from_email: "",
+    company: "",
+    service_name: "",
+    message: "",
+  });
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
 
-  emailjs
-    .sendForm(
-      "service_7texoyc",
-      "template_f8qokmw",
-      form.current,
-      "gQaVKW7issbc2C0Q1"
-    )
-    .then((result) => {
-      console.log("Success:", result);
+  const isValidEmail = (email) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const validateField = (name, value) => {
+    switch (name) {
+      case "from_name":
+        return value.trim() ? "" : "Name is required.";
+      case "from_email": {
+        if (!value.trim()) return "Email is required.";
+        return isValidEmail(value) ? "" : "Please enter a valid email address.";
+      }
+      case "service_name":
+        return value.trim() ? "" : "Service name is required.";
+      case "message":
+        return value.trim() ? "" : "Message is required.";
+      default:
+        return "";
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+
+    const nextError = validateField(name, value);
+    setErrors((prev) => ({
+      ...prev,
+      [name]: nextError,
+    }));
+
+    if (touched[name]) {
+      setErrors((prev) => ({
+        ...prev,
+        [name]: nextError,
+      }));
+    }
+  };
+
+  const handleBlur = (e) => {
+    const { name, value } = e.target;
+    setTouched((prev) => ({ ...prev, [name]: true }));
+    setErrors((prev) => ({
+      ...prev,
+      [name]: validateField(name, value),
+    }));
+  };
+
+  const isFormValid =
+    formData.from_name.trim() !== "" &&
+    formData.from_email.trim() !== "" &&
+    isValidEmail(formData.from_email) &&
+    formData.service_name.trim() !== "" &&
+    formData.message.trim() !== "";
+
+  const validateForm = () => {
+    const nextErrors = {
+      from_name: validateField("from_name", formData.from_name),
+      from_email: validateField("from_email", formData.from_email),
+      service_name: validateField("service_name", formData.service_name),
+      message: validateField("message", formData.message),
+    };
+
+    setTouched({
+      from_name: true,
+      from_email: true,
+      service_name: true,
+      message: true,
+    });
+    setErrors(nextErrors);
+    return !Object.values(nextErrors).some(Boolean);
+  };
+
+  const sendEmail = async (e) => {
+    e.preventDefault();
+
+    if (!validateForm()) {
+      return;
+    }
+
+    const name = formData.from_name.trim();
+    const email = formData.from_email.trim();
+    const company = formData.company.trim();
+    const serviceName = formData.service_name.trim();
+    const message = formData.message.trim();
+    const matchedServices = getMatchingServices(serviceName);
+
+    try {
+      await emailjs.sendForm(
+        "service_7texoyc",
+        "template_f8qokmw",
+        form.current,
+        "gQaVKW7issbc2C0Q1"
+      );
+
+      await emailjs.send(
+        "service_7texoyc",
+        "template_evmvfwi",
+        {
+          to_email: email,
+          to_name: name,
+          service_name:
+            matchedServices.map((service) => service.title).join(", ") || serviceName,
+          service_description:
+            matchedServices
+              .map((service) => `${service.title}: ${service.description}`)
+              .join(" | ") || "No matching service description was found.",
+          company: company || "Not provided",
+          message,
+        },
+        "gQaVKW7issbc2C0Q1"
+      );
+
       alert("Message Sent Successfully!");
-      form.current.reset();
-    })
-    .catch((error) => {
+      setFormData({
+        from_name: "",
+        from_email: "",
+        company: "",
+        service_name: "",
+        message: "",
+      });
+      setErrors({});
+    } catch (error) {
       console.error("EmailJS Error");
       console.error("Status:", error.status);
       console.error("Text:", error.text);
       console.error(error);
 
-      alert(`Error ${error.status}: ${error.text}`);
-    });
-};
-
-
+      alert(
+        `Error ${error.status || "Unknown"}: ${
+          error.text || error.message || "Unable to send email"
+        }`
+      );
+    }
+  };
 
 const techData = {
   linux: {
@@ -153,6 +274,48 @@ const techData = {
     tags: ["Web Server", "Reverse Proxy"],
     use: "Used for load balancing and web hosting."
   }
+};
+
+const normalizeServiceName = (value = "") =>
+  value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+const getServiceCandidates = (value = "") =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const getMatchingServices = (value = "") => {
+  const inputs = getServiceCandidates(value);
+
+  if (!inputs.length) {
+    return [];
+  }
+
+  const matches = inputs
+    .map((input) => {
+      const matchedEntry = Object.entries(techData).find(([key, data]) => {
+        const keyMatch = normalizeServiceName(key) === normalizeServiceName(input);
+        const titleMatch = normalizeServiceName(data.title) === normalizeServiceName(input);
+        const tagMatch = data.tags.some(
+          (tag) => normalizeServiceName(tag) === normalizeServiceName(input)
+        );
+
+        return keyMatch || titleMatch || tagMatch;
+      });
+
+      if (!matchedEntry) {
+        return null;
+      }
+
+      return matchedEntry[1];
+    })
+    .filter(Boolean);
+
+  return matches.length ? matches : [{
+    title: inputs.join(", "),
+    description: "No matching service description was found in the catalog."
+  }];
 };
 
 const openModal = (tech) => {
@@ -441,7 +604,7 @@ const closeModal = () => {
       </div>
     </div>
   </section>
-  {/* CERTIFICATIONS */}
+{/*  {CERTIFICATIONS}
   <section id="certifications">
     <h2 className="title">Certifications</h2>
     <div className="certifications">
@@ -463,6 +626,8 @@ const closeModal = () => {
       </div>
     </div>
   </section>
+*/}
+
   {/* PROJECTS */}
   <section id="projects">
     <h2 className="title">Projects</h2>
@@ -512,40 +677,98 @@ const closeModal = () => {
     </div>
   </section>
   {/* CONTACT */}
+
 <section id="contact">
   <h2 className="title">Contact Us</h2>
 
-  <form
-    ref={form}
-    onSubmit={sendEmail}
-    className="contact-form"
-  >
-    <input
-      type="text"
-      name="from_name"
-      placeholder="Your Name"
-      required
-    />
+  <form ref={form} onSubmit={sendEmail} className="contact-form" noValidate>
+    <div className="field">
+      <label className="field-label">
+        Your Name <span className="required">*</span>
+      </label>
+      <input
+        type="text"
+        name="from_name"
+        value={formData.from_name}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        className={touched.from_name && errors.from_name ? "input-error" : ""}
+        aria-invalid={!!(touched.from_name && errors.from_name)}
+        required
+      />
+      {touched.from_name && errors.from_name && (
+        <span className="field-error">{errors.from_name}</span>
+      )}
+    </div>
 
-    <input
-      type="email"
-      name="from_email"
-      placeholder="Your Email"
-      required
-    />
+    <div className="field">
+      <label className="field-label">
+        Your Email <span className="required">*</span>
+      </label>
+      <input
+        type="email"
+        name="from_email"
+        value={formData.from_email}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        className={touched.from_email && errors.from_email ? "input-error" : ""}
+        aria-invalid={!!(touched.from_email && errors.from_email)}
+        required
+      />
+      {touched.from_email && errors.from_email && (
+        <span className="field-error">{errors.from_email}</span>
+      )}
+    </div>
 
-    <input
-      type="text"
-      name="company"
-      placeholder="Company Name"
-    />
+    <div className="field">
+      <label className="field-label">
+        Company Name
+      </label>
+      <input
+        type="text"
+        name="company"
+        value={formData.company}
+        onChange={handleChange}
+      />
+    </div>
 
-    <textarea
-      name="message"
-      rows={6}
-      placeholder="Tell us about your project"
-      required
-    ></textarea>
+    <div className="field">
+      <label className="field-label">
+        Service Name <span className="required">*</span>
+      </label>
+      <input
+        type="text"
+        name="service_name"
+        value={formData.service_name}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        placeholder="Linux, AWS, Kubernetes"
+        className={touched.service_name && errors.service_name ? "input-error" : ""}
+        aria-invalid={!!(touched.service_name && errors.service_name)}
+      />
+      {touched.service_name && errors.service_name && (
+        <span className="field-error">{errors.service_name}</span>
+      )}
+    </div>
+
+    <div className="field">
+      <label className="field-label">
+        Message <span className="required">*</span>
+      </label>
+      <textarea
+        name="message"
+        rows={6}
+        value={formData.message}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        className={touched.message && errors.message ? "input-error" : ""}
+        aria-invalid={!!(touched.message && errors.message)}
+        required
+      />
+      {touched.message && errors.message && (
+        <span className="field-error">{errors.message}</span>
+      )}
+    </div>
 
     <button type="submit">
       Send Your Inquiry
@@ -558,6 +781,7 @@ const closeModal = () => {
     <p>🌐 Linux • AWS • Kubernetes • Scripting</p>
   </div>
 </section>
+
   {/* FOOTER */}
   <footer>
     <h3>Infravora Technologies</h3>
